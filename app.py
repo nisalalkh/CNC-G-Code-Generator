@@ -1,48 +1,82 @@
-from flask import Flask, request, render_template, send_file
+from flask import Flask, render_template, request, jsonify
 import os
-from image_processor import process_file, generate_gcode
+from milling import generate_milling_gcode
+from drilling import generate_drilling_gcode
+from cutting import generate_cutting_gcode
+import config
 
 app = Flask(__name__)
 
-# Directories for file storage
-UPLOAD_FOLDER = './uploads'
-PROCESSED_FOLDER = './processed'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(PROCESSED_FOLDER, exist_ok=True)
+# Ensure the upload folder exists
+UPLOAD_FOLDER = 'uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-@app.route("/")
-def home():
-    return render_template("index.html")  # Load the main web page
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-@app.route("/process-image", methods=["POST"])
-def process_image():
-    # Get file and user inputs from the form
-    file = request.files.get("file")
-    feed_rate = request.form.get("feed_rate", 1000, type=int)  # Default feed rate: 1000
-    
-    if not file:
-        return "No file uploaded!", 400
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-    # Save the uploaded file
-    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(filepath)
+# Validate G-code
+def validate_cutting_gcode(gcode):
+    for line in gcode.splitlines():
+        if line.startswith("G1") or line.startswith("G0"):
+            parts = line.split()
+            for part in parts:
+                if part.startswith("X"):
+                    x_value = float(part[1:])
+                    if x_value < 0 or x_value > config.BOARD_WIDTH:
+                        return f"Error: X-coordinate {x_value} out of bounds."
+                if part.startswith("Y"):
+                    y_value = float(part[1:])
+                    if y_value < 0 or y_value > config.BOARD_HEIGHT:
+                        return f"Error: Y-coordinate {y_value} out of bounds."
+                if part.startswith("Z"):
+                    z_value = float(part[1:])
+                    if z_value not in [config.SAFE_HEIGHT, config.CUTTING_DEPTH]:
+                        return f"Error: Z-coordinate {z_value} invalid."
 
+    return "Valid"
+# Generate G-code with spindle control
+def generate_gcode_with_spindle(x, y, z, cutting_depth, spindle_speed):
+    gcode = []
+    gcode.append(f"M3 S{spindle_speed}")  # Start spindle at specified speed
+    gcode.append(f"G1 X{x} Y{y} Z{z}")   # Move tool to specified coordinates
+    if z < cutting_depth:
+        gcode.append(f"G1 Z{cutting_depth}")  # Cut to desired depth
+    gcode.append("M5")  # Stop the spindle
+    return "\n".join(gcode)
+
+@app.route('/generate_gcode', methods=['POST'])
+def generate_gcode():
     try:
-        # Process the file (image or PDF) and extract contours
-        contours = process_file(filepath)
+        operation = request.form.get('operation')
+        file = request.files.get('file')
 
-        # Generate G-code from contours
-        gcode = generate_gcode(contours, feed_rate)
-        gcode_path = os.path.join(PROCESSED_FOLDER, "output.gcode")
-        with open(gcode_path, 'w') as gcode_file:
-            for line in gcode:
-                gcode_file.write(line + '\n')
+        if not file or not operation:
+            return jsonify({"error": "Invalid input parameters."}), 400
 
-        # Return the G-code file for download
-        return send_file(gcode_path, as_attachment=True, download_name="output.gcode")
+        file_path = os.path.join('uploads', file.filename)
+        file.save(file_path)
 
-    except ValueError as e:
-        return str(e), 400
+        if operation == 'cutting':
+            gcode = generate_cutting_gcode(file_path)
+        elif operation == 'milling':
+            gcode = generate_milling_gcode(file_path)
+        elif operation == 'drilling':
+            gcode = generate_drilling_gcode(file_path)
+        else:
+            return jsonify({"error": "Unknown operation type."}), 400
 
-if __name__ == "__main__":
+        if "Error" in gcode:
+            return jsonify({"error": gcode}), 400
+
+        # Return the G-code directly
+        return gcode, 200, {'Content-Type': 'text/plain'}
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
     app.run(debug=True)
