@@ -29,7 +29,8 @@
       color: #f8f8f2;
       padding: 10px;
       border-radius: 5px;
-      height: 300px;
+      width: 600px;
+      height: 200px;
       overflow-y: auto;
     }
   </style>
@@ -67,38 +68,23 @@
             </select>
           </div>
         </form>
-      </div>
-    </div>
-
-    <div class="row mt-4">
-      <!-- Custom Parameters -->
-      <div class="col-md-6">
-        <h3>Custom Parameters</h3>
-        <form id="parametersForm">
-          <div class="mb-3">
-            <label for="feedRate" class="form-label">Feed Rate (units/min):</label>
-            <input type="number" class="form-control" id="feedRate" placeholder="Enter feed rate">
-          </div>
-          <div class="mb-3">
-            <label for="cuttingDepth" class="form-label">Cutting Depth (mm):</label>
-            <input type="number" class="form-control" id="cuttingDepth" placeholder="Enter cutting depth">
-          </div>
-          <div class="mb-3">
-            <label for="drillingDepth" class="form-label">Drilling Depth (mm):</label>
-            <input type="number" class="form-control" id="drillingDepth" placeholder="Enter drilling depth">
-          </div>
-        </form>
-      </div>
-
-      <!-- G-Code Preview -->
+        <!-- G-Code Preview -->
       <div class="col-md-6">
         <h3>G-Code Preview</h3>
         <div class="gcode-preview" id="gcodePreview">
           <p>G-Code will be displayed here.</p>
-        </div>
+        </div></div>
+      </div>
+      
+    </div>
+ 
+   
+
+      <div>
         <button class="btn btn-primary mt-3" id="generateGCode">Generate G-Code</button>
         <a href="#" id="downloadGCode" class="btn btn-success mt-3">Download G-Code</a>
       </div>
+
     </div>
   </div>
 
@@ -146,6 +132,45 @@
         console.error("Error:", error);
         alert("An error occurred. Please check the console for details.");
     }
+});
+document.getElementById("generateGCode").addEventListener("click", async function () {
+  const designFile = document.getElementById("designFile").files[0];
+  const operationType = document.getElementById("operationType").value;
+
+  if (!designFile) {
+    alert("Please upload a PCB design file.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", designFile);
+  formData.append("operation", operationType);
+
+  try {
+    const response = await fetch("/generate_gcode", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (response.ok) {
+      const gcode = await response.text();
+      document.getElementById("gcodePreview").textContent = gcode;
+
+      // Enable the download button and generate G-code file
+      const downloadLink = document.getElementById("downloadGCode");
+      const blob = new Blob([gcode], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      downloadLink.href = url;
+      downloadLink.download = "generated_gcode.nc";
+      downloadLink.style.display = "inline-block"; // Make download button visible
+    } else {
+      const errorData = await response.json();
+      alert(errorData.error || "Failed to generate G-code.");
+    }
+  } catch (error) {
+    console.error("Error:", error);
+    alert("An error occurred. Please check the console for details.");
+  }
 });
 
   </script>
